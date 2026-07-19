@@ -1,4 +1,4 @@
-# 🌊 Floating Trash Detection & Classification using YOLOv8
+# 🌊 Flotect –Floating Trash Detection & Classification using YOLOv8
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
