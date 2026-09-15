@@ -12,6 +12,7 @@ ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 MAX_FILES_PER_REQUEST = 8
+MAX_IMAGE_DIMENSION = 2048
 
 limiter = Limiter(
     key_func=get_remote_address,
@@ -70,7 +71,19 @@ def detect():
             os.remove(filepath)
             return 'One or more files are not valid images.', 400
 
-        results = model.predict(source=filepath, save=False, conf=0.25, verbose=False)
+        image = cv2.imread(filepath)
+        height, width = image.shape[:2]
+        largest_dimension = max(height, width)
+        if largest_dimension > MAX_IMAGE_DIMENSION:
+            scale = MAX_IMAGE_DIMENSION / largest_dimension
+            resized = cv2.resize(image, (round(width * scale), round(height * scale)))
+            cv2.imwrite(filepath, resized)
+
+        try:
+            results = model.predict(source=filepath, save=False, conf=0.25, verbose=False)
+        except Exception:
+            app.logger.exception('Detection failed for uploaded image')
+            return 'Detection failed while processing the image. Please try a smaller image.', 500
         detection_result = results[0]
         result_img = detection_result.plot()
 
