@@ -5,19 +5,19 @@
 [![Framework](https://img.shields.io/badge/Framework-Flask-red.svg)](https://flask.palletsprojects.com/)
 [![Model](https://img.shields.io/badge/Model-YOLOv8-green.svg)](https://github.com/ultralytics/ultralytics)
 
-This project presents an AI-powered web application for **Floating Trash Detection and Classification** using the **YOLOv8 object detection model**. The system automatically identifies and classifies floating waste from images of rivers, lakes, oceans, and other water bodies, helping environmental organizations monitor pollution efficiently. Built with **Flask** and **OpenCV**, the application provides a simple web interface where users can upload images and instantly receive annotated detection results.
+Flotect is an AI-powered web application for detecting and classifying floating waste in waterway images. It uses the selected **YOLOv8n** model with a Flask backend and a responsive dark violet interface. Users can upload one or multiple images, preview them before submission, monitor upload progress, and review annotated detection results with class counts and confidence scores.
 
 ***
 
 ## ✨ Key Features
 
-* **YOLOv8 Object Detection:** Utilizes the Ultralytics YOLOv8 model for fast and accurate floating trash detection.
-* **Web-Based Interface:** Interactive Flask application for uploading and processing images through a browser.
-* **Automatic Trash Classification:** Detects and classifies different categories of floating waste present in water bodies.
-* **Real-Time Image Processing:** Generates annotated images with bounding boxes and class labels within seconds.
-* **Secure Image Handling:** Uses UUID-based unique filenames to prevent file conflicts during uploads.
-* **High Detection Accuracy:** Leverages deep learning-based object detection for reliable environmental monitoring.
-* **Easy Deployment:** Lightweight architecture suitable for local execution or cloud deployment.
+* **Four trained classes:** carton, bottle, paper, and plastic.
+* **Multi-image upload:** Select or drag in multiple JPG, PNG, or WebP images.
+* **Image previews:** Review selected images before running detection.
+* **Upload feedback:** Shows upload readiness, progress percentage, and success/failure states.
+* **Detection reports:** Displays original images beside YOLOv8n annotated outputs.
+* **Confidence analysis:** Reports object totals, per-class counts, and confidence values.
+* **Cloud-ready deployment:** Includes Gunicorn, Procfile, and Render configuration.
 
 ***
 
@@ -27,20 +27,48 @@ This project presents an AI-powered web application for **Floating Trash Detecti
 * **Deep Learning Framework:** Ultralytics YOLOv8
 * **Backend Framework:** Flask
 * **Computer Vision:** OpenCV
-* **Frontend:** HTML, CSS
+* **Frontend:** HTML, CSS, JavaScript
 * **Image Processing:** NumPy
-* **Development Environment:** Jupyter Notebook, VS Code
+* **Production Server:** Gunicorn
 
 ***
 
 ## 🚀 Project Workflow
 
-1. User uploads an image through the Flask web interface.
-2. The uploaded image is securely stored in the server.
-3. YOLOv8 performs object detection on the image.
-4. Floating trash objects are identified and classified.
-5. Bounding boxes and class labels are drawn on detected objects.
-6. The annotated image is saved and displayed alongside the original image.
+1. The browser accepts one or more field images and creates local previews.
+2. Flask receives each image through the multipart `/detect` endpoint.
+3. Each upload is assigned a UUID filename and saved to the runtime upload directory.
+4. YOLOv8n predicts bounding boxes for the four trained waste classes.
+5. OpenCV saves an annotated result for each input image.
+6. Flask renders the original/result gallery with counts and confidence scores.
+
+### Architecture
+
+```text
+Browser upload and previews
+          |
+          v
+Flask multipart endpoint (/detect)
+          |
+          v
+UUID storage + YOLOv8n inference
+          |
+          v
+OpenCV annotation and result gallery
+```
+
+### Dataset scope
+
+The selected model was trained on 4,515 labeled floating-trash images:
+
+| Class | Images |
+| --- | ---: |
+| Bottle | 2,550 |
+| Carton | 1,056 |
+| Plastic | 482 |
+| Paper | 427 |
+
+YOLOv8n was selected after training and comparing YOLOv8n, YOLOv8s, YOLOv9c, and YOLOv9s for this application.
 
 ***
 
@@ -51,7 +79,7 @@ Floating-Trash-Detection-and-Classification/
 │
 ├── static/
 │   ├── uploads/
-│   └── css/
+│   └── styles.css
 │
 ├── templates/
 │   ├── index.html
@@ -104,14 +132,6 @@ cd Floating-Trash-Detection-and-Classification
 pip install -r requirements.txt
 ```
 
-### Download YOLOv8 Model
-
-```bash
-yolo detect predict model=yolov8n.pt
-```
-
-Or download the pretrained model from the Ultralytics repository.
-
 ### Run the Application
 
 ```bash
@@ -124,15 +144,22 @@ Open your browser and visit:
 http://127.0.0.1:5000
 ```
 
+### Production deployment
+
+The repository includes `Procfile` and `render.yaml` for Render deployment. The production start command is:
+
+```bash
+gunicorn app:app --workers 1 --threads 2 --timeout 120
+```
+
 ***
 
 ## 📸 Output
 
-- Upload an image containing a water body.
-- The YOLOv8 model detects floating trash.
-- The application displays:
-  - Original Image
-  - Detected Image with Bounding Boxes and Labels
+- Upload one or multiple images containing a water body.
+- Preview the selected files and monitor upload progress.
+- The YOLOv8n model detects floating trash.
+- The application displays each original image beside its annotated result.
 
 ***
 
@@ -163,6 +190,5 @@ This project is licensed under the **MIT License**.
 
 **Sravan**
 
-AI | Machine Learning | Deep Learning | Computer Vision | Full Stack Developer
 
 If you found this project useful, don't forget to ⭐ the repository!
