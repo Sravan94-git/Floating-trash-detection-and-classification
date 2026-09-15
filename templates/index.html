@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Flotect | Floating trash detection</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+</head>
+<body>
+  <header class="topbar shell">
+    <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">F</span><span>FLOTECT<small>FIELD LAB</small></span></a>
+  </header>
+
+  <main>
+    <section class="hero shell">
+      <div class="hero-copy">
+        <p class="eyebrow">01 / Visual field intelligence</p>
+        <h1>Turn a waterway<br /><em>into data.</em></h1>
+        <p class="intro">Flotect turns one image into a readable waste map. Upload a field frame and inspect what the YOLOv8n model can see.</p>
+        <div class="hero-note"><span class="note-line"></span><span>Fast, focused, four-class detection</span></div>
+      </div>
+
+      <form class="upload-panel" action="{{ url_for('detect') }}" method="POST" enctype="multipart/form-data">
+        <div class="upload-heading"><span class="step">01</span><div><p class="eyebrow">Start an analysis</p><h2>Bring in a field image</h2><p class="panel-copy">JPG or PNG · up to 16 MB</p></div></div>
+        <label class="dropzone" for="image" id="dropzone">
+          <span class="upload-icon">↑</span>
+          <strong>Browse files or drop here</strong>
+          <span id="file-status">Your image stays in this analysis session</span>
+          <input id="image" type="file" name="images" accept="image/png,image/jpeg,image/webp" multiple required />
+        </label>
+        <div class="preview-grid" id="preview-grid" aria-live="polite"></div>
+        <div class="upload-progress" id="upload-progress" aria-live="polite">
+          <div class="progress-heading"><span id="upload-message">Preparing upload</span><strong id="upload-percent">0%</strong></div>
+          <div class="progress-track"><span id="progress-bar"></span></div>
+        </div>
+        <button class="primary-button" id="submit-button" type="submit" disabled><span>Analyze image</span><span aria-hidden="true">&#8594;</span></button>
+      </form>
+    </section>
+
+    <section class="methodology shell" id="methodology">
+      <div class="section-heading"><p class="eyebrow">02 / System map</p><h2>How the signal moves</h2><p>Three connected stages carry an image from the browser to an interpretable detection report.</p></div>
+      <div class="architecture-flow">
+        <article class="flow-step"><div class="flow-top"><span class="card-number">01</span><span class="flow-icon">↥</span></div><h3>Capture</h3><p>Flask accepts a JPG or PNG from the field and stores a temporary working copy.</p><div class="flow-meta">INPUT / IMAGE</div></article>
+        <div class="flow-connector"><span></span><b>pass</b><span></span></div>
+        <article class="flow-step active"><div class="flow-top"><span class="card-number">02</span><span class="flow-icon">✦</span></div><h3>Interpret</h3><p>Selected YOLOv8n runs object detection against the four trained waste classes.</p><div class="flow-meta">ENGINE / YOLOV8N</div></article>
+        <div class="flow-connector"><span></span><b>pass</b><span></span></div>
+        <article class="flow-step"><div class="flow-top"><span class="card-number">03</span><span class="flow-icon">◫</span></div><h3>Report</h3><p>Bounding boxes, class totals, and confidence scores return as one visual report.</p><div class="flow-meta">OUTPUT / REPORT</div></article>
+      </div>
+      <div class="model-strip"><span>MODEL BENCHMARK</span><strong>YOLOv8n</strong><span>selected for production</span><i></i><span>YOLOv8s</span><span>YOLOv9c</span><span>YOLOv9s</span></div>
+    </section>
+    <section class="supported shell" id="supported"><div><p class="eyebrow">03 / Model scope</p><h2>Four signals.<br /><em>One clear read.</em></h2></div><div class="supported-list"><div><b>01</b><span>Carton</span><small>1,056 training images</small></div><div><b>02</b><span>Bottle</span><small>2,550 training images</small></div><div><b>03</b><span>Paper</span><small>427 training images</small></div><div><b>04</b><span>Plastic</span><small>482 training images</small></div></div></section>
+  </main>
+  <footer class="shell footer"><span>FLOTECT / floating trash intelligence</span><span>Model scope: 4 classes only</span></footer>
+  <script>
+    const input = document.getElementById('image');
+    const dropzone = document.getElementById('dropzone');
+    const status = document.getElementById('file-status');
+    const button = document.getElementById('submit-button');
+    const form = document.querySelector('.upload-panel');
+    const progress = document.getElementById('upload-progress');
+    const progressBar = document.getElementById('progress-bar');
+    const uploadPercent = document.getElementById('upload-percent');
+    const uploadMessage = document.getElementById('upload-message');
+    const previewGrid = document.getElementById('preview-grid');
+    const updateFiles = (files) => {
+      if (!files.length) return;
+      const invalid = files.some((file) => {
+        const validType = ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || /\.(jpe?g|png|webp)$/i.test(file.name);
+        return !validType || file.size > 16 * 1024 * 1024;
+      });
+      if (invalid) {
+        status.textContent = 'Use JPG, PNG, or WebP files under 16 MB each';
+        status.classList.add('invalid');
+        button.disabled = true;
+        return;
+      }
+      status.textContent = `${files.length} image${files.length === 1 ? '' : 's'} ready to upload`;
+      status.classList.remove('invalid');
+      button.disabled = false;
+      dropzone.classList.add('has-file');
+      uploadMessage.textContent = 'Image ready to upload';
+      previewGrid.innerHTML = '';
+      files.forEach((file) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const preview = document.createElement('div');
+          preview.className = 'preview-item';
+          preview.innerHTML = `<img src="${reader.result}" alt="Preview of ${file.name}"><span>${file.name}</span>`;
+          previewGrid.appendChild(preview);
+        };
+        reader.readAsDataURL(file);
+      });
+    };
+    input.addEventListener('change', () => updateFiles(Array.from(input.files)));
+    ['dragenter', 'dragover'].forEach((eventName) => dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault(); dropzone.classList.add('is-dragging');
+    }));
+    ['dragleave', 'drop'].forEach((eventName) => dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault(); dropzone.classList.remove('is-dragging');
+    }));
+    dropzone.addEventListener('drop', (event) => {
+      const files = event.dataTransfer.files;
+      if (files.length) { input.files = files; updateFiles(Array.from(files)); }
+    });
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!input.files.length) return;
+      const request = new XMLHttpRequest();
+      const formData = new FormData(form);
+      progress.classList.add('visible');
+      button.disabled = true;
+      uploadMessage.textContent = 'Uploading image';
+      request.upload.addEventListener('progress', (progressEvent) => {
+        if (!progressEvent.lengthComputable) return;
+        const percent = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+        progressBar.style.width = `${percent}%`;
+        uploadPercent.textContent = `${percent}%`;
+      });
+      request.addEventListener('load', () => {
+        if (request.status >= 200 && request.status < 400) {
+          progressBar.style.width = '100%';
+          uploadPercent.textContent = '100%';
+          uploadMessage.textContent = 'Image uploaded successfully';
+          setTimeout(() => { document.open(); document.write(request.responseText); document.close(); }, 350);
+        } else {
+          uploadMessage.textContent = 'Upload failed. Please try again.';
+          button.disabled = false;
+        }
+      });
+      request.addEventListener('error', () => {
+        uploadMessage.textContent = 'Upload failed. Please try again.';
+        button.disabled = false;
+      });
+      request.addEventListener('timeout', () => {
+        uploadMessage.textContent = 'Upload timed out. Please try again.';
+        button.disabled = false;
+      });
+      request.open('POST', form.action);
+      request.timeout = 120000;
+      request.send(formData);
+    });
+  </script>
+</body>
+</html>
