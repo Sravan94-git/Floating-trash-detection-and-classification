@@ -152,6 +152,20 @@ The repository includes `Procfile` and `render.yaml` for Render deployment. The 
 gunicorn app:app --workers 1 --threads 2 --timeout 120
 ```
 
+### Production security baseline
+
+The public upload endpoint includes:
+
+- `16 MB` maximum request size.
+- Maximum of 8 images per request.
+- JPG, JPEG, PNG, and WebP extension checks plus OpenCV content validation.
+- UUID-generated server filenames instead of user-provided paths.
+- Detection throttling at 10 requests per minute per client.
+- `nosniff`, clickjacking, referrer, and permissions security headers.
+- Debug mode disabled in the production entry point.
+
+The limiter currently uses in-process memory for the single-worker Render service. If the service is scaled to multiple instances, configure a shared Redis storage backend for consistent rate limits.
+
 ***
 
 ## 📸 Output

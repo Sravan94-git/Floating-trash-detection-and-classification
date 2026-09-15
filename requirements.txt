@@ -2,3 +2,4 @@ flask
 ultralytics
 opencv-python
 gunicorn
+Flask-Limiter
