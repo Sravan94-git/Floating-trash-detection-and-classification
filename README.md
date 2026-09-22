@@ -1,11 +1,11 @@
-# 🌊 Flotect –Floating Trash Detection & Classification using YOLOv8
+# 🌊 Flotect - Floating Trash Detection & Classification Using YOLOv8
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Framework](https://img.shields.io/badge/Framework-Flask-red.svg)](https://flask.palletsprojects.com/)
+[![Framework](https://img.shields.io/badge/Framework-FastAPI-teal.svg)](https://fastapi.tiangolo.com/)
 [![Model](https://img.shields.io/badge/Model-YOLOv8-green.svg)](https://github.com/ultralytics/ultralytics)
 
-Flotect is an AI-powered web application for detecting and classifying floating waste in waterway images. It uses the selected **YOLOv8n** model with a Flask backend and a responsive dark violet interface. Users can upload one or multiple images, preview them before submission, monitor upload progress, and review annotated detection results with class counts and confidence scores.
+Flotect is an AI-powered **FastAPI and React application** for detecting and classifying floating waste in waterway images. It uses the **YOLOv8n** model with a FastAPI inference backend and a responsive React frontend. Users can upload one or multiple images, preview them before submission, and review annotated detection results with class counts and confidence scores.
 
 ***
 
@@ -14,80 +14,81 @@ Flotect is an AI-powered web application for detecting and classifying floating 
 * **Four trained classes:** carton, bottle, paper, and plastic.
 * **Multi-image upload:** Select or drag in multiple JPG, PNG, or WebP images.
 * **Image previews:** Review selected images before running detection.
-* **Upload feedback:** Shows upload readiness, progress percentage, and success/failure states.
 * **Detection reports:** Displays original images beside YOLOv8n annotated outputs.
 * **Confidence analysis:** Reports object totals, per-class counts, and confidence values.
-* **Cloud-ready deployment:** Includes Gunicorn, Procfile, and Render configuration.
+* **Interactive API documentation:** FastAPI provides automatic documentation at `/docs`.
 
 ***
 
-## 🛠️ Tech Stack
+## 🛠️ Technologies Used
 
 * **Programming Language:** Python 3
 * **Deep Learning Framework:** Ultralytics YOLOv8
-* **Backend Framework:** Flask
+* **Backend Framework:** FastAPI
+* **Frontend:** React and Vite
 * **Computer Vision:** OpenCV
-* **Frontend:** HTML, CSS, JavaScript
-* **Image Processing:** NumPy
-* **Production Server:** Gunicorn
+* **Image Processing:** Pillow and NumPy
+* **API Server:** Uvicorn
 
 ***
 
 ## 🚀 Project Workflow
 
-1. The browser accepts one or more field images and creates local previews.
-2. Flask receives each image through the multipart `/detect` endpoint.
-3. Each upload is assigned a UUID filename and saved to the runtime upload directory.
+1. The browser accepts one or more images and creates local previews.
+2. The React frontend sends the images to the FastAPI `/api/detect` endpoint.
+3. FastAPI validates and prepares each uploaded image.
 4. YOLOv8n predicts bounding boxes for the four trained waste classes.
-5. OpenCV saves an annotated result for each input image.
-6. Flask renders the original/result gallery with counts and confidence scores.
+5. OpenCV generates annotated images and the API returns detection data.
+6. The frontend displays the original and annotated images with counts and confidence scores.
 
 ### Architecture
 
 ```text
-Browser upload and previews
-          |
-          v
-Flask multipart endpoint (/detect)
-          |
-          v
-UUID storage + YOLOv8n inference
-          |
-          v
-OpenCV annotation and result gallery
+React frontend: upload and previews
+		  |
+		  v
+FastAPI endpoint: POST /api/detect
+		  |
+		  v
+Image validation + YOLOv8n inference
+		  |
+		  v
+Annotated results and detection reports
 ```
 
 ### Dataset scope
 
-The selected model was trained on 4,515 labeled floating-trash images:
+The selected model recognizes four floating-trash classes:
 
-| Class | Images |
-| --- | ---: |
-| Bottle | 2,550 |
-| Carton | 1,056 |
-| Plastic | 482 |
-| Paper | 427 |
-
-YOLOv8n was selected after training and comparing YOLOv8n, YOLOv8s, YOLOv9c, and YOLOv9s for this application.
+| Class | Description |
+| --- | --- |
+| Bottle | Floating bottles |
+| Carton | Cartons and cardboard waste |
+| Plastic | Floating plastic waste |
+| Paper | Floating paper waste |
 
 ***
 
 ## 📂 Project Structure
 
 ```text
-Floating-Trash-Detection-and-Classification/
+Flotect/
 │
-├── static/
-│   ├── uploads/
-│   └── styles.css
+├── backend/
+│   ├── main.py
+│   ├── requirements.txt
+│   ├── yolov8n.pt
+│   └── Dockerfile
 │
-├── templates/
+├── frontend/
+│   ├── src/
+│   │   ├── main.jsx
+│   │   └── styles.css
 │   ├── index.html
-│   └── result.html
+│   ├── package.json
+│   └── vite.config.js
 │
-├── app.py
-├── requirements.txt
-├── yolov8n.pt
+├── LICENSE
 └── README.md
 ```
 
@@ -110,7 +111,6 @@ Floating-Trash-Detection-and-Classification/
 - 📹 Real-time video stream detection.
 - 🚁 Drone-based floating trash monitoring.
 - 📍 GPS-based pollution mapping.
-- ☁️ Cloud deployment with analytics dashboard.
 - 📱 Mobile application integration.
 - 🎥 Live CCTV camera support.
 - 📊 Detection statistics and reporting dashboard.
@@ -122,56 +122,49 @@ Floating-Trash-Detection-and-Classification/
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/Floating-Trash-Detection-and-Classification.git
-cd Floating-Trash-Detection-and-Classification
+git clone https://github.com/yourusername/Flotect.git
+cd Flotect
 ```
 
-### Install Dependencies
+### Install Backend Dependencies
 
-```bash
+```powershell
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Run the Application
+### Start the Backend
 
-```bash
-python app.py
+From the repository root:
+
+```powershell
+backend\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --port 8000
 ```
 
-Open your browser and visit:
+The API is available at `http://localhost:8000` and its interactive documentation is available at `http://localhost:8000/docs`.
 
-```
-http://127.0.0.1:5000
-```
+### Start the Frontend
 
-### Production deployment
+In a second terminal:
 
-The repository includes `Procfile` and `render.yaml` for Render deployment. The production start command is:
-
-```bash
-gunicorn app:app --workers 1 --threads 2 --timeout 120
+```powershell
+cd frontend
+npm install
+npm run dev
 ```
 
-### Production security baseline
+Open the frontend URL shown by Vite, usually `http://localhost:5173`.
 
-The public upload endpoint includes:
-
-- `16 MB` maximum request size.
-- Maximum of 8 images per request.
-- JPG, JPEG, PNG, and WebP extension checks plus OpenCV content validation.
-- UUID-generated server filenames instead of user-provided paths.
-- Detection throttling at 10 requests per minute per client.
-- `nosniff`, clickjacking, referrer, and permissions security headers.
-- Debug mode disabled in the production entry point.
-
-The limiter currently uses in-process memory for the single-worker Render service. If the service is scaled to multiple instances, configure a shared Redis storage backend for consistent rate limits.
+The API accepts up to 8 JPG, PNG, or WebP images per request, with a maximum size of 16 MB per image.
 
 ***
 
 ## 📸 Output
 
 - Upload one or multiple images containing a water body.
-- Preview the selected files and monitor upload progress.
+- Preview the selected files before detection.
 - The YOLOv8n model detects floating trash.
 - The application displays each original image beside its annotated result.
 
@@ -203,6 +196,5 @@ This project is licensed under the **MIT License**.
 ## 👨‍💻 Author
 
 **Sravan**
-
 
 If you found this project useful, don't forget to ⭐ the repository!
