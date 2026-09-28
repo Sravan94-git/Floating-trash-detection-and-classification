@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
@@ -8,12 +8,41 @@ const MAX_SIZE = 16 * 1024 * 1024;
 const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
 
 function App() {
+  const [apiReady, setApiReady] = useState(false);
   const [files, setFiles] = useState([]);
   const [report, setReport] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [status, setStatus] = useState('Your image stays in this analysis session');
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    let retryTimer;
+    let requestTimeout;
+
+    async function checkApi() {
+      const controller = new AbortController();
+      requestTimeout = setTimeout(() => controller.abort(), 10000);
+      try {
+        const response = await fetch(`${API_URL}/health`, { signal: controller.signal });
+        if (!response.ok) throw new Error('API is not ready');
+        if (active) setApiReady(true);
+      } catch {
+        if (active) setApiReady(false);
+      } finally {
+        clearTimeout(requestTimeout);
+        if (active && !apiReady) retryTimer = setTimeout(checkApi, 5000);
+      }
+    }
+
+    checkApi();
+    return () => {
+      active = false;
+      clearTimeout(retryTimer);
+      clearTimeout(requestTimeout);
+    };
+  }, [apiReady]);
 
   function selectFiles(nextFiles) {
     const selected = Array.from(nextFiles);
@@ -57,7 +86,7 @@ function App() {
         setProgress(null);
       }
     };
-    request.onerror = () => { setError('Could not reach the detection API. Check VITE_API_URL.'); setProgress(null); };
+    request.onerror = () => { setError('Could not reach the detection API. Reconnecting to the backend.'); setApiReady(false); setProgress(null); };
     request.ontimeout = () => { setError('The analysis timed out. Please try a smaller image.'); setProgress(null); };
     request.send(formData);
   }
@@ -65,7 +94,7 @@ function App() {
   if (report) return <Report report={report} onReset={() => { setReport(null); setFiles([]); setProgress(null); setStatus('Your image stays in this analysis session'); }} />;
 
   return <>
-    <header className="topbar shell"><div className="brand"><span className="brand-mark">F</span><span>FLOTECT<small>FIELD LAB</small></span></div><span className="status"><i /> API READY</span></header>
+    <header className="topbar shell"><div className="brand"><span className="brand-mark">F</span><span>FLOTECT<small>FIELD LAB</small></span></div><span className={`status ${apiReady ? 'is-ready' : 'is-waiting'}`} aria-live="polite"><i /> {apiReady ? 'API READY' : 'WAKING BACKEND'}</span></header>
     <main>
       <section className="hero shell">
         <div className="hero-copy"><p className="eyebrow">01 / Visual field intelligence</p><h1>Turn a waterway<br /><em>into data.</em></h1><p className="intro">Flotect turns one image into a readable waste map. Upload a field frame and inspect what the YOLOv8n model can see.</p><div className="hero-note"><span className="note-line" />Fast, focused, four-class detection</div></div>
@@ -75,8 +104,9 @@ function App() {
             <span className="upload-icon">↑</span><strong>Browse files or drop here</strong><span className={error ? 'invalid' : ''}>{error || status}</span><input type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={(event) => selectFiles(event.target.files)} />
           </label>
           {files.length > 0 && <div className="preview-grid">{files.map((file) => <div className="preview-item" key={`${file.name}-${file.lastModified}`}><img src={URL.createObjectURL(file)} alt={`Preview of ${file.name}`} /><span>{file.name}</span></div>)}</div>}
+          {!apiReady && <div className="backend-notice" role="status"><span className="backend-spinner" /><span><strong>Getting the backend ready</strong><small>Render may need a minute to wake up. Analysis will be available as soon as it responds.</small></span></div>}
           {progress && <div className="upload-progress"><div className="progress-heading"><span>{progress.message}</span><strong>{progress.percent}%</strong></div><div className="progress-track"><span style={{ width: `${progress.percent}%` }} /></div></div>}
-          <button className="primary-button" disabled={!files.length || progress} onClick={detect}><span>{progress ? 'Analyzing...' : 'Analyze image'}</span><span aria-hidden="true">→</span></button>
+          <button className="primary-button" disabled={!apiReady || !files.length || progress} onClick={detect}><span>{progress ? 'Analyzing...' : apiReady ? 'Analyze image' : 'Waiting for backend'}</span><span aria-hidden="true">→</span></button>
         </section>
       </section>
       <section className="methodology shell"><div className="section-heading"><p className="eyebrow">02 / System map</p><h2>How the signal moves</h2><p>Three connected stages carry an image from the browser to an interpretable detection report.</p></div><div className="architecture-flow"><Step number="01" title="Capture" text="React accepts a JPG or PNG from the field and sends a temporary working copy." /><div className="flow-connector">pass</div><Step number="02" title="Interpret" text="Selected YOLOv8n runs object detection against four trained waste classes" active /><div className="flow-connector">pass</div><Step number="03" title="Report" text="Bounding boxes, class totals, and confidence scores return as one visual report." /></div></section>
