@@ -12,6 +12,8 @@ const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
 
 function App() {
   const [apiReady, setApiReady] = useState(false);
+  const [wakeSeconds, setWakeSeconds] = useState(0);
+  const [retryCount, setRetryCount] = useState(0);
   const [files, setFiles] = useState([]);
   const [report, setReport] = useState(null);
   const [dragging, setDragging] = useState(false);
@@ -30,20 +32,31 @@ function App() {
   useEffect(() => {
     let active = true;
     let retryTimer;
-    
+    let wakeInterval;
+
+    // Track elapsed waiting time so user gets real-time feedback while Render wakes up
+    wakeInterval = setInterval(() => {
+      setWakeSeconds(s => s + 1);
+    }, 1000);
+
     async function checkApi() {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
         const response = await fetch(`${API_URL}/health`, { signal: controller.signal });
         clearTimeout(timeoutId);
         
-        if (response.ok && active) setApiReady(true);
-        else throw new Error('Not ready');
+        if (response.ok && active) {
+          setApiReady(true);
+          clearInterval(wakeInterval);
+        } else {
+          throw new Error('Not ready');
+        }
       } catch (e) {
         if (active) {
           setApiReady(false);
-          retryTimer = setTimeout(checkApi, 3000);
+          setRetryCount(r => r + 1);
+          retryTimer = setTimeout(checkApi, 2500);
         }
       }
     }
@@ -52,6 +65,7 @@ function App() {
     return () => {
       active = false;
       clearTimeout(retryTimer);
+      clearInterval(wakeInterval);
     };
   }, []);
 
@@ -254,30 +268,80 @@ function App() {
           <div className="logo-icon">F</div>
           Flotect
         </div>
+        {apiReady && (
+          <div className="server-status-pill online">
+            <span className="status-dot"></span>
+            AI Backend Connected
+          </div>
+        )}
       </header>
 
-      {/* CROP MODAL */}
-      {cropFile && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h3>Crop Image</h3>
-              <button onClick={() => setCropFile(null)} style={{background: 'none', border: 'none', cursor: 'pointer', fontSize: '24px', color: 'var(--text-secondary)'}}>×</button>
-            </div>
-            <div className="modal-body">
-              <ReactCrop crop={crop} onChange={(_, percentCrop) => setCrop(percentCrop)} onComplete={(c) => setCompletedCrop(c)}>
-                <img ref={imgRef} src={cropFile} alt="Crop preview" style={{ maxHeight: '60vh', maxWidth: '100%' }} />
-              </ReactCrop>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setCropFile(null)}>Cancel</button>
-              <button className="btn-primary auto-width" onClick={applyCrop}>Apply Crop</button>
+      {/* Render Server Wakeup / Loading Screen */}
+      {!apiReady ? (
+        <div className="server-loading-card">
+          <div className="server-radar-animation">
+            <div className="radar-circle circle-1"></div>
+            <div className="radar-circle circle-2"></div>
+            <div className="radar-circle circle-3"></div>
+            <div className="radar-center-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+              </svg>
             </div>
           </div>
-        </div>
-      )}
 
-      {!report ? (
+          <h2>Connecting to AI Inference Engine...</h2>
+          <p className="loading-description">
+            Render spins down free services after periods of inactivity. The backend container is currently booting and initializing the YOLOv8 model.
+          </p>
+
+          <div className="loading-metric-bar">
+            <div className="loading-progress-indeterminate"></div>
+          </div>
+
+          <div className="loading-stats">
+            <div className="loading-stat-badge">
+              <span className="stat-bullet">⏱</span>
+              Elapsed: <strong>{wakeSeconds}s</strong>
+            </div>
+            <div className="loading-stat-badge">
+              <span className="stat-bullet">📡</span>
+              Pings sent: <strong>{retryCount + 1}</strong>
+            </div>
+            <div className="loading-stat-badge">
+              <span className="stat-bullet">⚡</span>
+              Status: <strong>Waking up</strong>
+            </div>
+          </div>
+
+          <p className="loading-hint">
+            This typically takes 25–45 seconds on the first cold start. The application interface will automatically appear as soon as the service is ready.
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* CROP MODAL */}
+          {cropFile && (
+            <div className="modal-overlay">
+              <div className="modal-content">
+                <div className="modal-header">
+                  <h3>Crop Image</h3>
+                  <button onClick={() => setCropFile(null)} style={{background: 'none', border: 'none', cursor: 'pointer', fontSize: '24px', color: 'var(--text-secondary)'}}>×</button>
+                </div>
+                <div className="modal-body">
+                  <ReactCrop crop={crop} onChange={(_, percentCrop) => setCrop(percentCrop)} onComplete={(c) => setCompletedCrop(c)}>
+                    <img ref={imgRef} src={cropFile} alt="Crop preview" style={{ maxHeight: '60vh', maxWidth: '100%' }} />
+                  </ReactCrop>
+                </div>
+                <div className="modal-footer">
+                  <button className="btn-secondary" onClick={() => setCropFile(null)}>Cancel</button>
+                  <button className="btn-primary auto-width" onClick={applyCrop}>Apply Crop</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!report ? (
         <main>
           <div className="hero-section">
             <h1>Waterway waste <span>intelligence</span></h1>
@@ -478,6 +542,8 @@ function App() {
             </aside>
           </div>
         </main>
+      )}
+      </>
       )}
     </div>
   );

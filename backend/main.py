@@ -33,14 +33,23 @@ ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 app = FastAPI(title="Flotect API", version="1.0.0")
 
+# Configure CORS - allows specific domains, localhost, and Vercel deployments
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
-allowed_origins = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", frontend_url).split(",") if origin.strip()]
+
+if allowed_origins_env:
+    allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+else:
+    allowed_origins = [frontend_url, "http://localhost:5173", "http://localhost:3000"]
+
+allow_all = "*" in allowed_origins
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=["*"] if allow_all else allowed_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app" if not allow_all else None,
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
