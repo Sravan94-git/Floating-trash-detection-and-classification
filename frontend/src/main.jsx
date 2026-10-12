@@ -1,6 +1,5 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import ReactCrop from 'react-image-crop';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import './styles.css';
@@ -12,32 +11,18 @@ const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
 
 function App() {
   const [apiReady, setApiReady] = useState(false);
-  const [wakeSeconds, setWakeSeconds] = useState(0);
-  const [retryCount, setRetryCount] = useState(0);
   const [files, setFiles] = useState([]);
   const [report, setReport] = useState(null);
   const [dragging, setDragging] = useState(false);
-  const [progress, setProgress] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [progressPercent, setProgressPercent] = useState(0);
   const [error, setError] = useState('');
   const [confidence, setConfidence] = useState(0.25);
-  
-  // Crop state
-  const [cropFile, setCropFile] = useState(null);
-  const [cropFileIndex, setCropFileIndex] = useState(null);
-  const [crop, setCrop] = useState({ unit: '%', width: 50, height: 50, x: 25, y: 25 });
-  const [completedCrop, setCompletedCrop] = useState(null);
-  const imgRef = useRef(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
     let active = true;
     let retryTimer;
-    let wakeInterval;
-
-    // Track elapsed waiting time so user gets real-time feedback while Render wakes up
-    wakeInterval = setInterval(() => {
-      setWakeSeconds(s => s + 1);
-    }, 1000);
 
     async function checkApi() {
       try {
@@ -48,14 +33,12 @@ function App() {
         
         if (response.ok && active) {
           setApiReady(true);
-          clearInterval(wakeInterval);
         } else {
           throw new Error('Not ready');
         }
       } catch (e) {
         if (active) {
           setApiReady(false);
-          setRetryCount(r => r + 1);
           retryTimer = setTimeout(checkApi, 2500);
         }
       }
@@ -65,7 +48,6 @@ function App() {
     return () => {
       active = false;
       clearTimeout(retryTimer);
-      clearInterval(wakeInterval);
     };
   }, []);
 
@@ -109,63 +91,12 @@ function App() {
     }
   };
 
-  const openCrop = (fileObj, index) => {
-    setCropFile(fileObj.preview);
-    setCropFileIndex(index);
-    setCrop({ unit: '%', width: 50, height: 50, x: 25, y: 25 });
-  };
-
-  const applyCrop = async () => {
-    if (!completedCrop || !imgRef.current) {
-      setCropFile(null);
-      return;
-    }
-
-    const image = imgRef.current;
-    const canvas = document.createElement('canvas');
-    const scaleX = image.naturalWidth / image.width;
-    const scaleY = image.naturalHeight / image.height;
-    
-    canvas.width = Math.floor(completedCrop.width * scaleX);
-    canvas.height = Math.floor(completedCrop.height * scaleY);
-    
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(
-      image,
-      completedCrop.x * scaleX,
-      completedCrop.y * scaleY,
-      completedCrop.width * scaleX,
-      completedCrop.height * scaleY,
-      0,
-      0,
-      completedCrop.width * scaleX,
-      completedCrop.height * scaleY
-    );
-    
-    canvas.toBlob(blob => {
-      if (!blob) return;
-      
-      const newFile = new File([blob], files[cropFileIndex].file.name, {
-        type: 'image/jpeg',
-      });
-      
-      const newFiles = [...files];
-      // Revoke old URL to avoid memory leaks
-      URL.revokeObjectURL(newFiles[cropFileIndex].preview);
-      
-      newFiles[cropFileIndex] = {
-        file: newFile,
-        preview: URL.createObjectURL(newFile)
-      };
-      
-      setFiles(newFiles);
-      setCropFile(null);
-      setCropFileIndex(null);
-    }, 'image/jpeg', 0.95);
-  };
-
   const detect = () => {
     if (!files.length) return;
+    
+    setLoading(true);
+    setProgressPercent(15);
+    setError('');
     
     const formData = new FormData();
     files.forEach(f => formData.append('images', f.file));
@@ -174,33 +105,52 @@ function App() {
     const request = new XMLHttpRequest();
     request.open('POST', `${API_URL}/api/detect`);
     
-    setProgress({ percent: 0 });
-    setError('');
+    // Smooth progress progression while YOLO model runs inference
+    const ticker = setInterval(() => {
+      setProgressPercent(prev => {
+        if (prev < 88) {
+          return prev + Math.floor(Math.random() * 6) + 3;
+        }
+        if (prev < 96) {
+          return prev + 1;
+        }
+        return prev;
+      });
+    }, 200);
     
     request.upload.onprogress = (e) => {
       if (e.lengthComputable) {
-        setProgress({ percent: Math.round((e.loaded / e.total) * 100) });
+        const uploadPct = Math.round((e.loaded / e.total) * 50);
+        setProgressPercent(p => Math.max(p, uploadPct));
       }
     };
     
     request.onload = () => {
-      setProgress(null);
-      let payload;
-      try {
-        payload = JSON.parse(request.responseText);
-      } catch {
-        payload = {};
-      }
+      clearInterval(ticker);
+      setProgressPercent(100);
       
-      if (request.status >= 200 && request.status < 300) {
-        setReport(payload);
-      } else {
-        setError(payload.detail || 'Analysis failed. Please try again.');
-      }
+      setTimeout(() => {
+        setLoading(false);
+        setProgressPercent(0);
+        let payload;
+        try {
+          payload = JSON.parse(request.responseText);
+        } catch {
+          payload = {};
+        }
+        
+        if (request.status >= 200 && request.status < 300) {
+          setReport(payload);
+        } else {
+          setError(payload.detail || 'Analysis failed. Please try again.');
+        }
+      }, 300);
     };
     
     request.onerror = () => {
-      setProgress(null);
+      clearInterval(ticker);
+      setLoading(false);
+      setProgressPercent(0);
       setError('Network error. Could not connect to the analysis server.');
       setApiReady(false);
     };
@@ -211,7 +161,8 @@ function App() {
   const reset = () => {
     setReport(null);
     setFiles([]);
-    setProgress(null);
+    setLoading(false);
+    setProgressPercent(0);
     setError('');
   };
 
@@ -268,78 +219,18 @@ function App() {
           <div className="logo-icon">F</div>
           Flotect
         </div>
-        {apiReady && (
-          <div className="server-status-pill online">
-            <span className="status-dot"></span>
-            AI Backend Connected
-          </div>
-        )}
       </header>
 
-      {/* Render Server Wakeup / Loading Screen */}
-      {!apiReady ? (
-        <div className="server-loading-card">
-          <div className="server-radar-animation">
-            <div className="radar-circle circle-1"></div>
-            <div className="radar-circle circle-2"></div>
-            <div className="radar-circle circle-3"></div>
-            <div className="radar-center-icon">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-              </svg>
-            </div>
+      {/* Minimal Loading Screen Overlay */}
+      {!apiReady && (
+        <div className="minimal-loading-overlay">
+          <div className="minimal-loading-content">
+            <div className="minimal-spinner"></div>
+            <div className="loading-title">Loading</div>
+            <div className="loading-subtitle">Connecting to backend</div>
           </div>
-
-          <h2>Connecting to AI Inference Engine...</h2>
-          <p className="loading-description">
-            Render spins down free services after periods of inactivity. The backend container is currently booting and initializing the YOLOv8 model.
-          </p>
-
-          <div className="loading-metric-bar">
-            <div className="loading-progress-indeterminate"></div>
-          </div>
-
-          <div className="loading-stats">
-            <div className="loading-stat-badge">
-              <span className="stat-bullet">⏱</span>
-              Elapsed: <strong>{wakeSeconds}s</strong>
-            </div>
-            <div className="loading-stat-badge">
-              <span className="stat-bullet">📡</span>
-              Pings sent: <strong>{retryCount + 1}</strong>
-            </div>
-            <div className="loading-stat-badge">
-              <span className="stat-bullet">⚡</span>
-              Status: <strong>Waking up</strong>
-            </div>
-          </div>
-
-          <p className="loading-hint">
-            This typically takes 25–45 seconds on the first cold start. The application interface will automatically appear as soon as the service is ready.
-          </p>
         </div>
-      ) : (
-        <>
-          {/* CROP MODAL */}
-          {cropFile && (
-            <div className="modal-overlay">
-              <div className="modal-content">
-                <div className="modal-header">
-                  <h3>Crop Image</h3>
-                  <button onClick={() => setCropFile(null)} style={{background: 'none', border: 'none', cursor: 'pointer', fontSize: '24px', color: 'var(--text-secondary)'}}>×</button>
-                </div>
-                <div className="modal-body">
-                  <ReactCrop crop={crop} onChange={(_, percentCrop) => setCrop(percentCrop)} onComplete={(c) => setCompletedCrop(c)}>
-                    <img ref={imgRef} src={cropFile} alt="Crop preview" style={{ maxHeight: '60vh', maxWidth: '100%' }} />
-                  </ReactCrop>
-                </div>
-                <div className="modal-footer">
-                  <button className="btn-secondary" onClick={() => setCropFile(null)}>Cancel</button>
-                  <button className="btn-primary auto-width" onClick={applyCrop}>Apply Crop</button>
-                </div>
-              </div>
-            </div>
-          )}
+      )}
 
           {!report ? (
         <main>
@@ -349,22 +240,7 @@ function App() {
           </div>
           
           <div className="upload-card">
-            
-            <div className="controls-panel">
-              <div className="slider-group">
-                <label>Confidence Threshold:</label>
-                <input 
-                  type="range" 
-                  min="0.05" 
-                  max="0.95" 
-                  step="0.05" 
-                  value={confidence} 
-                  onChange={(e) => setConfidence(parseFloat(e.target.value))} 
-                />
-                <span className="slider-value">{Math.round(confidence * 100)}%</span>
-              </div>
-            </div>
-
+            {/* 1. Upload Images at Top */}
             <div 
               className={`dropzone ${dragging ? 'active' : ''}`}
               onDragOver={onDragOver}
@@ -386,34 +262,67 @@ function App() {
                 accept="image/jpeg,image/png,image/webp" 
               />
             </div>
+
+            {/* 2. Confidence Threshold Below Upload */}
+            <div className="controls-panel">
+              <div className="slider-group">
+                <label>Confidence Threshold:</label>
+                <input 
+                  type="range" 
+                  min="0.05" 
+                  max="0.95" 
+                  step="0.05" 
+                  value={confidence} 
+                  onChange={(e) => setConfidence(parseFloat(e.target.value))} 
+                />
+                <span className="slider-value">{Math.round(confidence * 100)}%</span>
+              </div>
+            </div>
             
             {error && <div className="error-message">{error}</div>}
             
+            {/* 3. Image Previews & Analyze */}
             {files.length > 0 && (
               <div className="preview-container">
                 <div className="preview-grid">
                   {files.map((fileObj, i) => (
-                    <div key={i} className="preview-item" onClick={(e) => e.stopPropagation()}>
+                    <div key={i} className="preview-item">
                       <img src={fileObj.preview} alt="preview" />
-                      <button className="crop-button" onClick={(e) => { e.stopPropagation(); openCrop(fileObj, i); }}>
-                        Crop
+                      <button 
+                        className="remove-img-btn" 
+                        title="Remove image"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setFiles(files.filter((_, idx) => idx !== i));
+                        }}
+                      >
+                        ×
                       </button>
                     </div>
                   ))}
                 </div>
                 
-                {progress ? (
-                  <div className="progress-bar">
-                    <div className="progress-fill" style={{ width: `${progress.percent}%` }}></div>
+                <button 
+                  className="btn-primary" 
+                  onClick={detect} 
+                  disabled={!apiReady || loading}
+                >
+                  {loading ? 'Analyzing Images...' : `Analyze ${files.length} Image${files.length !== 1 ? 's' : ''}`}
+                </button>
+
+                {/* Loading percentage displayed below when analyzing */}
+                {loading && (
+                  <div className="analysis-progress-wrapper">
+                    <div className="analysis-progress-bar">
+                      <div className="analysis-progress-fill" style={{ width: `${progressPercent}%` }}></div>
+                    </div>
+                    <div className="analysis-progress-info">
+                      <span className="analysis-progress-label">
+                        {progressPercent < 100 ? 'Analyzing debris with YOLOv8...' : 'Complete! Preparing results...'}
+                      </span>
+                      <span className="analysis-progress-percentage">{progressPercent}%</span>
+                    </div>
                   </div>
-                ) : (
-                  <button 
-                    className="btn-primary" 
-                    onClick={detect} 
-                    disabled={!apiReady}
-                  >
-                    Analyze {files.length} Image{files.length !== 1 ? 's' : ''}
-                  </button>
                 )}
               </div>
             )}
@@ -542,8 +451,6 @@ function App() {
             </aside>
           </div>
         </main>
-      )}
-      </>
       )}
     </div>
   );
