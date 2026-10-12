@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
+import ReactCrop from 'react-image-crop';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 import './styles.css';
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
@@ -12,113 +15,473 @@ function App() {
   const [files, setFiles] = useState([]);
   const [report, setReport] = useState(null);
   const [dragging, setDragging] = useState(false);
-  const [status, setStatus] = useState('Your image stays in this analysis session');
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState('');
+  const [confidence, setConfidence] = useState(0.25);
+  
+  // Crop state
+  const [cropFile, setCropFile] = useState(null);
+  const [cropFileIndex, setCropFileIndex] = useState(null);
+  const [crop, setCrop] = useState({ unit: '%', width: 50, height: 50, x: 25, y: 25 });
+  const [completedCrop, setCompletedCrop] = useState(null);
+  const imgRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     let active = true;
     let retryTimer;
-    let requestTimeout;
-
+    
     async function checkApi() {
-      const controller = new AbortController();
-      requestTimeout = setTimeout(() => controller.abort(), 10000);
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
         const response = await fetch(`${API_URL}/health`, { signal: controller.signal });
-        if (!response.ok) throw new Error('API is not ready');
-        if (active) setApiReady(true);
-      } catch {
-        if (active) setApiReady(false);
-      } finally {
-        clearTimeout(requestTimeout);
-        if (active && !apiReady) retryTimer = setTimeout(checkApi, 5000);
+        clearTimeout(timeoutId);
+        
+        if (response.ok && active) setApiReady(true);
+        else throw new Error('Not ready');
+      } catch (e) {
+        if (active) {
+          setApiReady(false);
+          retryTimer = setTimeout(checkApi, 3000);
+        }
       }
     }
-
+    
     checkApi();
     return () => {
       active = false;
       clearTimeout(retryTimer);
-      clearTimeout(requestTimeout);
     };
-  }, [apiReady]);
+  }, []);
 
-  function selectFiles(nextFiles) {
-    const selected = Array.from(nextFiles);
-    if (selected.length > MAX_FILES) {
-      setError(`Please select no more than ${MAX_FILES} images.`);
+  const handleFiles = (selectedFiles) => {
+    const fileArray = Array.from(selectedFiles);
+    
+    if (fileArray.length > MAX_FILES) {
+      setError(`Maximum ${MAX_FILES} images allowed.`);
       return;
     }
-    const invalid = selected.find((file) => !validTypes.includes(file.type) || file.size > MAX_SIZE);
+    
+    const invalid = fileArray.find(f => !validTypes.includes(f.type) || f.size > MAX_SIZE);
     if (invalid) {
-      setError('Use JPG, PNG, or WebP files under 16 MB each.');
-      setFiles([]);
+      setError('Please use JPG, PNG, or WebP under 16MB.');
       return;
     }
+    
     setError('');
-    setReport(null);
-    setFiles(selected);
-    setStatus(`${selected.length} image${selected.length === 1 ? '' : 's'} ready to upload`);
-  }
+    // Convert to objects with preview URLs and original files
+    const newFiles = fileArray.map(f => ({
+      file: f,
+      preview: URL.createObjectURL(f)
+    }));
+    setFiles(newFiles);
+  };
 
-  function detect() {
+  const onDragOver = (e) => {
+    e.preventDefault();
+    setDragging(true);
+  };
+
+  const onDragLeave = () => {
+    setDragging(false);
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFiles(e.dataTransfer.files);
+    }
+  };
+
+  const openCrop = (fileObj, index) => {
+    setCropFile(fileObj.preview);
+    setCropFileIndex(index);
+    setCrop({ unit: '%', width: 50, height: 50, x: 25, y: 25 });
+  };
+
+  const applyCrop = async () => {
+    if (!completedCrop || !imgRef.current) {
+      setCropFile(null);
+      return;
+    }
+
+    const image = imgRef.current;
+    const canvas = document.createElement('canvas');
+    const scaleX = image.naturalWidth / image.width;
+    const scaleY = image.naturalHeight / image.height;
+    
+    canvas.width = Math.floor(completedCrop.width * scaleX);
+    canvas.height = Math.floor(completedCrop.height * scaleY);
+    
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(
+      image,
+      completedCrop.x * scaleX,
+      completedCrop.y * scaleY,
+      completedCrop.width * scaleX,
+      completedCrop.height * scaleY,
+      0,
+      0,
+      completedCrop.width * scaleX,
+      completedCrop.height * scaleY
+    );
+    
+    canvas.toBlob(blob => {
+      if (!blob) return;
+      
+      const newFile = new File([blob], files[cropFileIndex].file.name, {
+        type: 'image/jpeg',
+      });
+      
+      const newFiles = [...files];
+      // Revoke old URL to avoid memory leaks
+      URL.revokeObjectURL(newFiles[cropFileIndex].preview);
+      
+      newFiles[cropFileIndex] = {
+        file: newFile,
+        preview: URL.createObjectURL(newFile)
+      };
+      
+      setFiles(newFiles);
+      setCropFile(null);
+      setCropFileIndex(null);
+    }, 'image/jpeg', 0.95);
+  };
+
+  const detect = () => {
     if (!files.length) return;
+    
     const formData = new FormData();
-    files.forEach((file) => formData.append('images', file));
+    files.forEach(f => formData.append('images', f.file));
+    formData.append('confidence', confidence);
+    
     const request = new XMLHttpRequest();
     request.open('POST', `${API_URL}/api/detect`);
-    request.timeout = 180000;
-    setProgress({ percent: 0, message: 'Uploading image' });
+    
+    setProgress({ percent: 0 });
     setError('');
-    request.upload.onprogress = (event) => {
-      if (event.lengthComputable) setProgress({ percent: Math.round((event.loaded / event.total) * 100), message: 'Uploading image' });
-    };
-    request.onload = () => {
-      let payload;
-      try { payload = JSON.parse(request.responseText); } catch { payload = {}; }
-      if (request.status >= 200 && request.status < 300) {
-        setProgress({ percent: 100, message: 'Analysis complete' });
-        setReport(payload);
-        setStatus('Analysis ready to review');
-      } else {
-        setError(payload.detail || 'Detection failed. Please try again.');
-        setProgress(null);
+    
+    request.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        setProgress({ percent: Math.round((e.loaded / e.total) * 100) });
       }
     };
-    request.onerror = () => { setError('Could not reach the detection API. Reconnecting to the backend.'); setApiReady(false); setProgress(null); };
-    request.ontimeout = () => { setError('The analysis timed out. Please try a smaller image.'); setProgress(null); };
+    
+    request.onload = () => {
+      setProgress(null);
+      let payload;
+      try {
+        payload = JSON.parse(request.responseText);
+      } catch {
+        payload = {};
+      }
+      
+      if (request.status >= 200 && request.status < 300) {
+        setReport(payload);
+      } else {
+        setError(payload.detail || 'Analysis failed. Please try again.');
+      }
+    };
+    
+    request.onerror = () => {
+      setProgress(null);
+      setError('Network error. Could not connect to the analysis server.');
+      setApiReady(false);
+    };
+    
     request.send(formData);
-  }
+  };
 
-  if (report) return <Report report={report} onReset={() => { setReport(null); setFiles([]); setProgress(null); setStatus('Your image stays in this analysis session'); }} />;
+  const reset = () => {
+    setReport(null);
+    setFiles([]);
+    setProgress(null);
+    setError('');
+  };
 
-  return <>
-    <header className="topbar shell"><div className="brand"><span className="brand-mark">F</span><span>FLOTECT<small>FIELD LAB</small></span></div><span className={`status ${apiReady ? 'is-ready' : 'is-waiting'}`} aria-live="polite"><i /> {apiReady ? 'API READY' : 'WAKING BACKEND'}</span></header>
-    <main>
-      <section className="hero shell">
-        <div className="hero-copy"><p className="eyebrow">01 / Visual field intelligence</p><h1>Turn a waterway<br /><em>into data.</em></h1><p className="intro">Flotect turns one image into a readable waste map. Upload a field frame and inspect what the YOLOv8n model can see.</p><div className="hero-note"><span className="note-line" />Fast, focused, four-class detection</div></div>
-        <section className="upload-panel">
-          <div className="upload-heading"><span className="step">01</span><div><p className="eyebrow">Start an analysis</p><h2>Bring in a field image</h2><p className="panel-copy">JPG or PNG · up to 16 MB · 8 images max</p></div></div>
-          <label className={`dropzone ${dragging ? 'is-dragging' : ''} ${files.length ? 'has-file' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); selectFiles(event.dataTransfer.files); }}>
-            <span className="upload-icon">↑</span><strong>Browse files or drop here</strong><span className={error ? 'invalid' : ''}>{error || status}</span><input type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={(event) => selectFiles(event.target.files)} />
-          </label>
-          {files.length > 0 && <div className="preview-grid">{files.map((file) => <div className="preview-item" key={`${file.name}-${file.lastModified}`}><img src={URL.createObjectURL(file)} alt={`Preview of ${file.name}`} /><span>{file.name}</span></div>)}</div>}
-          {!apiReady && <div className="backend-notice" role="status"><span className="backend-spinner" /><span><strong>Getting the backend ready</strong><small>Render may need a minute to wake up. Analysis will be available as soon as it responds.</small></span></div>}
-          {progress && <div className="upload-progress"><div className="progress-heading"><span>{progress.message}</span><strong>{progress.percent}%</strong></div><div className="progress-track"><span style={{ width: `${progress.percent}%` }} /></div></div>}
-          <button className="primary-button" disabled={!apiReady || !files.length || progress} onClick={detect}><span>{progress ? 'Analyzing...' : apiReady ? 'Analyze image' : 'Waiting for backend'}</span><span aria-hidden="true">→</span></button>
-        </section>
-      </section>
-      <section className="methodology shell"><div className="section-heading"><p className="eyebrow">02 / System map</p><h2>How the signal moves</h2><p>Three connected stages carry an image from the browser to an interpretable detection report.</p></div><div className="architecture-flow"><Step number="01" title="Capture" text="React accepts a JPG or PNG from the field and sends a temporary working copy." /><div className="flow-connector">pass</div><Step number="02" title="Interpret" text="Selected YOLOv8n runs object detection against four trained waste classes" active /><div className="flow-connector">pass</div><Step number="03" title="Report" text="Bounding boxes, class totals, and confidence scores return as one visual report." /></div></section>
-      <section className="supported shell"><div><p className="eyebrow">03 / Model scope</p><h2>Four signals.<br /><em>One clear read.</em></h2></div><div className="supported-list">{['Carton', 'Bottle', 'Paper', 'Plastic'].map((label, index) => <div key={label}><b>0{index + 1}</b><span>{label}</span><small>Supported detection class</small></div>)}</div></section>
-    </main><footer className="shell footer"><span>FLOTECT / floating trash intelligence</span><span>FastAPI + YOLOv8n</span></footer>
-  </>;
+  const exportPDF = async () => {
+    const el = document.getElementById('report-content');
+    if (!el) return;
+    
+    // Set exporting state to temporarily hide things or add loading if needed
+    try {
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true });
+      const imgData = canvas.toDataURL('image/jpeg', 0.9);
+      
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save('Flotect_Detection_Report.pdf');
+    } catch (err) {
+      console.error('Error generating PDF', err);
+      alert('Failed to generate PDF. Please try again.');
+    }
+  };
+
+  const exportCSV = () => {
+    if (!report) return;
+    
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += "Filename,Detected Object,Confidence (%)\n";
+    
+    report.images.forEach(img => {
+      if (img.detections.length === 0) {
+        csvContent += `${img.filename},None,0\n`;
+      } else {
+        img.detections.forEach(det => {
+          csvContent += `${img.filename},${det.label},${det.confidence}\n`;
+        });
+      }
+    });
+    
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "Flotect_Data.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <div className="app-container">
+      <header>
+        <div className="logo">
+          <div className="logo-icon">F</div>
+          Flotect
+        </div>
+      </header>
+
+      {/* CROP MODAL */}
+      {cropFile && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3>Crop Image</h3>
+              <button onClick={() => setCropFile(null)} style={{background: 'none', border: 'none', cursor: 'pointer', fontSize: '24px', color: 'var(--text-secondary)'}}>×</button>
+            </div>
+            <div className="modal-body">
+              <ReactCrop crop={crop} onChange={(_, percentCrop) => setCrop(percentCrop)} onComplete={(c) => setCompletedCrop(c)}>
+                <img ref={imgRef} src={cropFile} alt="Crop preview" style={{ maxHeight: '60vh', maxWidth: '100%' }} />
+              </ReactCrop>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setCropFile(null)}>Cancel</button>
+              <button className="btn-primary auto-width" onClick={applyCrop}>Apply Crop</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!report ? (
+        <main>
+          <div className="hero-section">
+            <h1>Waterway waste <span>intelligence</span></h1>
+            <p>Upload field images to automatically detect, classify, and count floating debris using our optimized YOLOv8 model.</p>
+          </div>
+          
+          <div className="upload-card">
+            
+            <div className="controls-panel">
+              <div className="slider-group">
+                <label>Confidence Threshold:</label>
+                <input 
+                  type="range" 
+                  min="0.05" 
+                  max="0.95" 
+                  step="0.05" 
+                  value={confidence} 
+                  onChange={(e) => setConfidence(parseFloat(e.target.value))} 
+                />
+                <span className="slider-value">{Math.round(confidence * 100)}%</span>
+              </div>
+            </div>
+
+            <div 
+              className={`dropzone ${dragging ? 'active' : ''}`}
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              onDrop={onDrop}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <svg className="dropzone-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              <h3>Click or drag images here</h3>
+              <p>Supports JPG, PNG, WebP up to 16MB</p>
+              <input 
+                type="file" 
+                className="file-input" 
+                ref={fileInputRef} 
+                onChange={(e) => handleFiles(e.target.files)} 
+                multiple 
+                accept="image/jpeg,image/png,image/webp" 
+              />
+            </div>
+            
+            {error && <div className="error-message">{error}</div>}
+            
+            {files.length > 0 && (
+              <div className="preview-container">
+                <div className="preview-grid">
+                  {files.map((fileObj, i) => (
+                    <div key={i} className="preview-item" onClick={(e) => e.stopPropagation()}>
+                      <img src={fileObj.preview} alt="preview" />
+                      <button className="crop-button" onClick={(e) => { e.stopPropagation(); openCrop(fileObj, i); }}>
+                        Crop
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                
+                {progress ? (
+                  <div className="progress-bar">
+                    <div className="progress-fill" style={{ width: `${progress.percent}%` }}></div>
+                  </div>
+                ) : (
+                  <button 
+                    className="btn-primary" 
+                    onClick={detect} 
+                    disabled={!apiReady}
+                  >
+                    Analyze {files.length} Image{files.length !== 1 ? 's' : ''}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <section className="architecture-section">
+            <div className="section-header">
+              <h2>System Architecture</h2>
+              <p>From Kaggle datasets to real-time waterway intelligence</p>
+            </div>
+            <div className="architecture-grid">
+              
+              <div className="arch-card">
+                <div className="arch-icon">
+                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                  </svg>
+                </div>
+                <h4>Data & Training</h4>
+                <p>Dataset sourced from Kaggle and used to fine-tune a YOLO model for floating debris detection.</p>
+              </div>
+
+              <div className="arch-connector">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                </svg>
+              </div>
+
+              <div className="arch-card">
+                <div className="arch-icon">
+                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                  </svg>
+                </div>
+                <h4>API Backend</h4>
+                <p>A secure FastAPI server wraps the trained model, handling validation and inference requests.</p>
+              </div>
+              
+              <div className="arch-connector">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                </svg>
+              </div>
+              
+              <div className="arch-card">
+                <div className="arch-icon">
+                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <h4>Client Interface</h4>
+                <p>A fast React application provides image cropping, dynamic confidence filtering, and reports.</p>
+              </div>
+
+            </div>
+          </section>
+        </main>
+      ) : (
+        <main className="results-view">
+          <div className="results-header">
+            <h2>Analysis Report</h2>
+            <div className="header-actions">
+              <button className="btn-secondary" onClick={exportCSV}>
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Export CSV
+              </button>
+              <button className="btn-secondary" onClick={exportPDF}>
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Export PDF
+              </button>
+              <button className="btn-secondary" onClick={reset}>
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                New Analysis
+              </button>
+            </div>
+          </div>
+          
+          <div className="results-grid" id="report-content" style={{ padding: '20px', background: 'var(--bg-color)', borderRadius: 'var(--radius-lg)' }}>
+            <div className="image-results">
+              {report.images.map((img, idx) => (
+                <div key={idx} className="result-card">
+                  <div className="result-images">
+                    <div className="result-image-wrapper">
+                      <div className="result-label">Original</div>
+                      <img src={img.input_image} alt="Original" />
+                    </div>
+                    <div className="result-image-wrapper">
+                      <div className="result-label">Detected</div>
+                      <img src={img.result_image} alt="Detected" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <aside className="summary-panel">
+              <h3>Detection Summary</h3>
+              <div className="stat-box">
+                <div className="stat-value">{report.detection_count}</div>
+                <div className="stat-label">Total Objects</div>
+              </div>
+              
+              {report.detection_count > 0 ? (
+                <div className="breakdown-list">
+                  {Object.entries(report.class_counts).map(([label, count]) => (
+                    <div key={label} className="breakdown-item">
+                      <span className="item-name">{label}</span>
+                      <span className="item-count">{count}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state">
+                  <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ margin: '0 auto', color: '#cbd5e1' }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <p>No supported debris detected in these images.</p>
+                </div>
+              )}
+            </aside>
+          </div>
+        </main>
+      )}
+    </div>
+  );
 }
 
-function Step({ number, title, text, active }) { return <article className={`flow-step ${active ? 'active' : ''}`}><div className="flow-top"><span className="card-number">{number}</span><span className="flow-icon">✦</span></div><h3>{title}</h3><p>{text}</p><div className="flow-meta">{active ? 'ENGINE / YOLOV8N' : 'INPUT / IMAGE'}</div></article>; }
-
-function Report({ report, onReset }) {
-  return <><header className="topbar shell"><div className="brand"><span className="brand-mark">F</span><span>FLOTECT<small>FIELD LAB</small></span></div><span className="status"><i /> ANALYSIS COMPLETE</span></header><main className="results-page shell"><div className="result-title"><div><p className="eyebrow">Detection report</p><h1>What Flotect found</h1></div><button className="secondary-button" onClick={onReset}>← New analysis</button></div><section className="result-layout"><div className="visuals">{report.images.map((image, index) => <div className="image-pair" key={`${image.filename}-${index}`}><figure className="image-card"><figcaption><span>Input {index + 1}</span><small>Original upload</small></figcaption><img src={image.input_image} alt={`Uploaded waterway image ${index + 1}`} /></figure><figure className="image-card featured"><figcaption><span>Result {index + 1}</span><small>YOLOv8n output</small></figcaption><img src={image.result_image} alt={`Annotated detection image ${index + 1}`} /></figure></div>)}</div><aside className="report-panel"><div className="metric"><span>Objects detected</span><strong>{report.detection_count}</strong></div><div className="report-divider" /><p className="eyebrow">Category breakdown</p>{report.detection_count ? <><div className="breakdown">{Object.entries(report.class_counts).map(([label, count]) => <div key={label}><span className="dot" /><span>{label}</span><strong>{count}</strong></div>)}</div><div className="report-divider" /><p className="eyebrow">Confidence log</p><div className="confidence-list">{report.detections.map((detection, index) => <div key={`${detection.label}-${index}`}><span>{detection.label}</span><span>{detection.confidence}%</span></div>)}</div></> : <div className="empty-state"><strong>No supported waste detected</strong><p>Try a clearer image with more visible floating material.</p></div>}<p className="scope-note">This model recognizes carton, bottle, paper, and plastic only.</p></aside></section></main></>;
-}
-
-createRoot(document.getElementById('root')).render(<App />);
+const root = createRoot(document.getElementById('root'));
+root.render(<App />);
